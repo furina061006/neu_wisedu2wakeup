@@ -23,7 +23,7 @@ using_webvpn = False
 def check_network():
     print("正在检查网络连接，请稍等...")
     try:
-        response = session.get("http://jwxt.neu.edu.cn", timeout=3)
+        response = session.get("https://jwxt.neu.edu.cn", timeout=3)
         if response.status_code == 200:
             print(colorama.Fore.LIGHTBLACK_EX + "内网访问")
             return
@@ -102,28 +102,37 @@ def neucas_qr_login():
     global session, using_webvpn
     if not using_webvpn:
         session.get(u_checkurl)
-        session.get("https://pass.neu.edu.cn/tpass/login?service=http%3A%2F%2Fjwxt.neu.edu.cn%2Fjwapp%2Fsys%2Fhomeapp%2Findex.do", allow_redirects=False)
-        session.get("https://pass.neu.edu.cn/tpass/login?service=http%3A%2F%2Fjwxt.neu.edu.cn%2Fjwapp%2Fsys%2Fhomeapp%2Findex.do%3FcontextPath%3D%2Fjwapp")
+        session.get("https://pass.neu.edu.cn/tpass/login?service=https%3A%2F%2Fjwxt.neu.edu.cn%2Fjwapp%2Fsys%2Fhomeapp%2Findex.do", allow_redirects=False)
+        session.get("https://pass.neu.edu.cn/tpass/login?service=https%3A%2F%2Fjwxt.neu.edu.cn%2Fjwapp%2Fsys%2Fhomeapp%2Findex.do%3FcontextPath%3D%2Fjwapp")
     else:
         session.get("https://webvpn.neu.edu.cn")
         session.headers.update({
             "referer": "https://webvpn.neu.edu.cn/https/62304135386136393339346365373340a0e0b72cc4cb43c8bc1d6f66c806db/tpass/login?service=https%3A%2F%2Fwebvpn.neu.edu.cn%2Flogin%3Fcas_login%3Dtrue",
         })
         session.get(set_webvpn(u_checkurl))
-        session.get("https://webvpn.neu.edu.cn/http/62304135386136393339346365373340baf6bc2bc4cb43c8bc1d6f66c806db/jwapp/sys/homeapp/index.do")
+        session.get("https://webvpn.neu.edu.cn/https/62304135386136393339346365373340baf6bc2bc4cb43c8bc1d6f66c806db/jwapp/sys/homeapp/index.do")
 
 def print_welcome():   
     global session
-    response = session.get(set_webvpn("http://jwxt.neu.edu.cn/jwapp/sys/homeapp/api/home/currentUser.do"))
+    response = session.get(set_webvpn("https://jwxt.neu.edu.cn/jwapp/sys/homeapp/api/home/currentUser.do"))
     response_json = response.json()
     username = response_json["datas"]["userName"]
     userid = response_json["datas"]["userId"]
     print(f"\n欢迎您，{username} ({userid})！")
     return username
 
+def check_xnxq_index(termcode):
+    global session
+    response = session.get(set_webvpn("https://jwxt.neu.edu.cn/jwapp/sys/homeapp/api/home/kb/xnxq.do"))
+    response_json = response.json()
+    for item in response_json["datas"]:
+        if item["itemCode"] == termcode:
+            return item["itemName"]
+    return None
+
 def get_termcode():
     global session
-    response = session.get(set_webvpn("http://jwxt.neu.edu.cn/jwapp/sys/homeapp/api/home/currentUser.do"))
+    response = session.get(set_webvpn("https://jwxt.neu.edu.cn/jwapp/sys/homeapp/api/home/currentUser.do"))
     response_json = response.json()
     termcode = response_json["datas"]["welcomeInfo"]["xnxqdm"]
     termname = response_json["datas"]["welcomeInfo"]["xnxqmc"]
@@ -139,21 +148,75 @@ def get_termcode():
             print(colorama.Fore.RED + "学期代码格式错误，使用默认学期")
         else:
             termcode = inputtermcode
+            termname = check_xnxq_index(termcode)
+            if termname is None:
+                print(colorama.Fore.RED + "学期代码错误，请检查后重新输入")
+                return get_termcode()
         
     return termcode, termname
 
 def get_campuscode(termcode):
     global session
-    resp = session.get(set_webvpn(f"http://jwxt.neu.edu.cn/jwapp/sys/homeapp/api/home/student/getMyScheduledCampus.do?termCode={termcode}"))
+    resp = session.get(set_webvpn(f"https://jwxt.neu.edu.cn/jwapp/sys/homeapp/api/home/student/getMyScheduledCampus.do?termCode={termcode}"))
     campuscode = resp.json()["datas"][0]["id"]
     return campuscode
 
 
+def process_normal_course(each_class):
+    courseName = each_class["courseName"]
+    dayOfWeek = each_class["dayOfWeek"]
+    beginSection = each_class["beginSection"]
+    endSection = each_class["endSection"]
+    titleDetail = each_class["titleDetail"]
+    weeksAndTeachers = each_class["weeksAndTeachers"]
+    teachers = weeksAndTeachers.split(r"/")[-1]
+    for i in range(1,len(titleDetail)):
+        i = titleDetail[i]
+        if not i[0:1].isdigit():
+            continue
+        append_list = []
+        week = i.split(" ")[0]
+        placeName = i.split(" ")[-1].replace("*","")
+        if placeName.endswith("校区"):
+            placeName = "暂未安排教室"
+        
+        append_list.append(courseName)
+        append_list.append(dayOfWeek)
+        append_list.append(beginSection)
+        append_list.append(endSection)
+        append_list.append(re.sub(r'\[.*?\]', '', teachers))
+        append_list.append(placeName)
+        append_list.append(week.replace(",","、").replace("(","").replace(")",""))
+        return append_list
+
+def process_lab_course(each_class):
+    courseName = each_class["courseName"]
+    dayOfWeek = each_class["dayOfWeek"]
+    beginSection = each_class["beginSection"]
+    endSection = each_class["endSection"]
+    weeksAndTeachers = each_class["weeksAndTeachers"]
+    teachers = each_class["titleDetail"][1].split(" ")[1]
+    placeName = each_class["placeName"].split(" ")[0]
+    if placeName.endswith(")"):
+        placeName = "暂未安排教室"
+    week = weeksAndTeachers.split(r"[")[0]
+    
+    append_list = []
+    append_list.append(courseName)
+    append_list.append(dayOfWeek)
+    append_list.append(beginSection)
+    append_list.append(endSection)
+    append_list.append(teachers)
+    append_list.append(placeName)
+    append_list.append(week.replace(",","、").replace("(","").replace(")",""))
+    return append_list
+    
+
 def convert_arranged_by_WoDeKeBiao(term):
 
     headers = {
-        "origin": "https://webvpn.neu.edu.cn" if using_webvpn else "http://jwxt.neu.edu.cn",
-        "Referer": set_webvpn('http://jwxt.neu.edu.cn/jwapp/sys/homeapp/home/index.html?av=&contextPath=/jwapp'),
+        "origin": "https://webvpn.neu.edu.cn" if using_webvpn else "https://jwxt.neu.edu.cn",
+        "Referer": set_webvpn('https://jwxt.neu.edu.cn/jwapp/sys/homeapp/home/index.html?av=&contextPath=/jwapp'),
         "user-agent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
         "content-type": 'application/x-www-form-urlencoded;charset=UTF-8',
     }
@@ -168,7 +231,7 @@ def convert_arranged_by_WoDeKeBiao(term):
 
     global session
     response = session.post(
-        set_webvpn('http://jwxt.neu.edu.cn/jwapp/sys/homeapp/api/home/student/getMyScheduleDetail.do'),
+        set_webvpn('https://jwxt.neu.edu.cn/jwapp/sys/homeapp/api/home/student/getMyScheduleDetail.do'),
         headers=headers,
         data=data,
         verify=False,
@@ -181,31 +244,12 @@ def convert_arranged_by_WoDeKeBiao(term):
     list_for_csv = []
     
     for each_class in schedule_list["arrangedList"]:
-        courseName = each_class["courseName"]
-        dayOfWeek = each_class["dayOfWeek"]
-        beginSection = each_class["beginSection"]
-        endSection = each_class["endSection"]
-        titleDetail = each_class["titleDetail"]
-        weeksAndTeachers = each_class["weeksAndTeachers"]
-        teachers = weeksAndTeachers.split(r"/")[-1]
-        for i in range(1,len(titleDetail)):
-            i = titleDetail[i]
-            if not i[0:1].isdigit():
-                continue
-            append_list = []
-            week = i.split(" ")[0]
-            placeName = i.split(" ")[-1].replace("*","")
-            if placeName.endswith("校区"):
-                placeName = "暂未安排教室"
-            
-            append_list.append(courseName)
-            append_list.append(dayOfWeek)
-            append_list.append(beginSection)
-            append_list.append(endSection)
-            append_list.append(re.sub(r'\[.*?\]', '', teachers))
-            append_list.append(placeName)
-            append_list.append(week.replace(",","、").replace("(","").replace(")",""))
-            list_for_csv.append(append_list)
+        
+        if len(str(each_class["courseCode"]).split("-")) == 1:
+            list_for_csv.append(process_normal_course(each_class))
+        else:
+            list_for_csv.append(process_lab_course(each_class))
+
     
     # 获取浑南校区课表
     
@@ -216,7 +260,7 @@ def convert_arranged_by_WoDeKeBiao(term):
     }
 
     response = session.post(
-        set_webvpn('http://jwxt.neu.edu.cn/jwapp/sys/homeapp/api/home/student/getMyScheduleDetail.do'),
+        set_webvpn('https://jwxt.neu.edu.cn/jwapp/sys/homeapp/api/home/student/getMyScheduleDetail.do'),
         headers=headers,
         data=data,
         verify=False,
@@ -226,33 +270,11 @@ def convert_arranged_by_WoDeKeBiao(term):
     schedule_list = schedule_json["datas"]
 
     for each_class in schedule_list["arrangedList"]:
-        courseName = each_class["courseName"]
-        dayOfWeek = each_class["dayOfWeek"]
-        beginSection = each_class["beginSection"]
-        endSection = each_class["endSection"]
-        titleDetail = each_class["titleDetail"]
-        weeksAndTeachers = each_class["weeksAndTeachers"]
-        teachers = weeksAndTeachers.split(r"/")[-1]
-        for i in range(1,len(titleDetail)):
-            i = titleDetail[i]
-            if not i[0:1].isdigit():
-                continue
-            append_list = []
-            week = i.split(" ")[0]
-            placeName = i.split(" ")[-1].replace("*","")
-            if placeName.endswith("校区"):
-                placeName = "暂未安排教室"
-            if placeName == "停课":
-                continue
-
-            append_list.append(courseName)
-            append_list.append(dayOfWeek)
-            append_list.append(beginSection)
-            append_list.append(endSection)
-            append_list.append(re.sub(r'\[.*?\]', '', teachers))
-            append_list.append(placeName)
-            append_list.append(week.replace(",","、").replace("(","").replace(")",""))
-            list_for_csv.append(append_list)
+        
+        if len(str(each_class["courseCode"]).split("-")) == 1:
+            list_for_csv.append(process_normal_course(each_class))
+        else:
+            list_for_csv.append(process_lab_course(each_class))
 
         
     return list_for_csv
@@ -261,8 +283,8 @@ def convert_arranged_by_WoDeKeBiao(term):
 def convert_arranged_by_WoDeKeCheng(term):
 
     headers = {
-        "origin": "https://webvpn.neu.edu.cn" if using_webvpn else "http://jwxt.neu.edu.cn",
-        "Referer": set_webvpn('http://jwxt.neu.edu.cn/jwapp/sys/homeapp/home/index.html?av=&contextPath=/jwapp'),
+        "origin": "https://webvpn.neu.edu.cn" if using_webvpn else "https://jwxt.neu.edu.cn",
+        "Referer": set_webvpn('https://jwxt.neu.edu.cn/jwapp/sys/homeapp/home/index.html?av=&contextPath=/jwapp'),
         "user-agent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
         "content-type": 'application/x-www-form-urlencoded;charset=UTF-8',
     }
@@ -270,7 +292,7 @@ def convert_arranged_by_WoDeKeCheng(term):
 
     global session
     response = session.get(
-        set_webvpn(f'http://jwxt.neu.edu.cn/jwapp/sys/homeapp/api/home/student/courses.do?termCode={term}'),
+        set_webvpn(f'https://jwxt.neu.edu.cn/jwapp/sys/homeapp/api/home/student/courses.do?termCode={term}'),
         headers=headers,
         verify=False,
     )
@@ -329,7 +351,7 @@ def prettytable_print(list_for_csv):
 def get_first_day(termcode):
     from datetime import datetime
     global session
-    resp = session.get(set_webvpn(f"http://jwxt.neu.edu.cn/jwapp/sys/homeapp/api/home/getTermWeeks.do?termCode={termcode}"))
+    resp = session.get(set_webvpn(f"https://jwxt.neu.edu.cn/jwapp/sys/homeapp/api/home/getTermWeeks.do?termCode={termcode}"))
     first_day = resp.json()["datas"][0]["startDate"]
     first_day = datetime.strptime(first_day, "%Y-%m-%d %H:%M:%S")
     first_day = int(first_day.timestamp())*1000
@@ -660,19 +682,20 @@ if __name__ == "__main__":
         campuscode = get_campuscode(termcode)
         print(f"获取{termname} ({termcode}) 课程表中...")
         try:
-            list_for_csv = convert_arranged_by_WoDeKeCheng(termcode)
+            list_for_csv = convert_arranged_by_WoDeKeBiao(termcode)
         except Exception as e:
-            print(colorama.Fore.RED + "使用“我的课程”模块获取课程表失败")
-            print(colorama.Fore.RED + "错误信息：" + str(e))
-            print("尝试使用“我的课表”模块获取课程表...")
-
-            try:
-                list_for_csv = convert_arranged_by_WoDeKeBiao(termcode)
-            except Exception as e2:
-                print(colorama.Fore.RED + "使用“我的课表”模块获取课程表失败")
-                print(colorama.Fore.RED + "错误信息：" + str(e2))
-                input("课程表获取失败，按回车键退出程序...")
-                sys.exit(1)
+            #print(colorama.Fore.RED + "使用“我的课程”模块获取课程表失败")
+            #print(colorama.Fore.RED + "错误信息：" + str(e))
+            #print("尝试使用“我的课表”模块获取课程表...")
+            #
+            #try:
+            #    print(colorama.Fore.YELLOW + "注意：可能会缺失实验课程，请自行核对")
+            #    list_for_csv = convert_arranged_by_WoDeKeCheng(termcode)
+            #except Exception as e2:
+            #    print(colorama.Fore.RED + "使用“我的课表”模块获取课程表失败")
+            #    print(colorama.Fore.RED + "错误信息：" + str(e2))
+            input("课程表获取失败，按回车键退出程序...")
+            sys.exit(1)
                 
         while True:
             print("==========获取结束==========")
